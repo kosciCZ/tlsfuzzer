@@ -913,6 +913,7 @@ class CertificateVerifyGenerator(HandshakeProtocolMessageGenerator):
                 if not self.private_key:
                     # when sending malformed messages, the key may not be
                     # even loaded, so select any algorithm acceptable to server
+                    # TODO: check if it matches the certificate we sent!
                     self.msg_alg = cert_req.supported_signature_algs[0]
                 else:
                     self.msg_alg = self._select_sig_alg(cert_req)
