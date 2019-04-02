@@ -216,7 +216,7 @@ def main():
         node = node.add_child(CertificateGenerator(X509CertChain([cert])))
         node = node.add_child(ClientKeyExchangeGenerator())
         node = node.add_child(TCPBufferingFlush())
-        node = node.add_child(CertificateVerifyGenerator(signature=sig[:i]))
+        node = node.add_child(CertificateVerifyGenerator(private_key, signature=sig[:i]))
         node = node.add_child(ChangeCipherSpecGenerator())
         node = node.add_child(FinishedGenerator())
         node = node.add_child(TCPBufferingDisable())
