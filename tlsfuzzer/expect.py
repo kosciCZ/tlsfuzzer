@@ -854,11 +854,34 @@ class ExpectCertificateVerify(ExpectHandshake):
                     SignatureScheme.rsa_pss_rsae_sha256,
                     SignatureScheme.rsa_pss_rsae_sha384,
                     SignatureScheme.rsa_pss_rsae_sha512)
+            elif state.get_server_public_key().key_type == "ecdsa":
+                size = len(state.get_server_public_key())
+                sigalg = cert_v.signatureAlgorithm
+                assert sigalg in (SignatureScheme.ecdsa_secp256r1_sha256,
+                                  SignatureScheme.ecdsa_secp384r1_sha384,
+                                  SignatureScheme.ecdsa_secp521r1_sha512)
+                assert size in (256, 384, 521)
+                # in TLS 1.3 the hash is bound to key size
+                if (size == 256 and \
+                        sigalg != SignatureScheme.ecdsa_secp256r1_sha256) or \
+                        (size == 384 and
+                            sigalg != SignatureScheme.ecdsa_secp384r1_sha384)\
+                        or (size == 521 and
+                            sigalg != SignatureScheme.ecdsa_secp521r1_sha512):
+                    raise AssertionError("Invalid signature type for P-{1} "
+                                         "cert: {0}"
+                                         .format(SignatureScheme.toStr(
+                                             sigalg, size)))
 
         salg = cert_v.signatureAlgorithm
 
-        scheme = SignatureScheme.toRepr(salg)
-        hash_name = SignatureScheme.getHash(scheme)
+        if salg[1] == SignatureAlgorithm.ecdsa:
+            hash_name = HashAlgorithm.toStr(salg[0])
+            padding = None
+        else:
+            scheme = SignatureScheme.toRepr(salg)
+            hash_name = SignatureScheme.getHash(scheme)
+            padding = SignatureScheme.getPadding(scheme)
 
         transcript_hash = state.handshake_hashes.digest(state.prf_name)
         sig_context = bytearray(b'\x20' * 64 +
@@ -868,7 +891,7 @@ class ExpectCertificateVerify(ExpectHandshake):
         if not state.get_server_public_key().hashAndVerify(
                 cert_v.signature,
                 sig_context,
-                SignatureScheme.getPadding(scheme),
+                padding,
                 hash_name,
                 getattr(hashlib, hash_name)().digest_size):
             raise AssertionError("Signature verification failed")
