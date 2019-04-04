@@ -884,6 +884,25 @@ class CertificateVerifyGenerator(HandshakeProtocolMessageGenerator):
                            SignatureScheme.rsa_pss_pss_sha384,
                            SignatureScheme.rsa_pss_pss_sha512):
                     return sig
+            elif self.private_key.key_type == "ecdsa" \
+                    and self.sig_version < (3, 4):
+                if sig in (SignatureScheme.ecdsa_secp521r1_sha512,
+                           SignatureScheme.ecdsa_secp384r1_sha384,
+                           SignatureScheme.ecdsa_secp256r1_sha256,
+                           (HashAlgorithm.sha224, SignatureAlgorithm.ecdsa),
+                           (HashAlgorithm.sha1, SignatureAlgorithm.ecdsa)):
+                    return sig
+            elif self.private_key.key_type == "ecdsa" and \
+                    self.sig_version > (3, 3):
+                if len(self.private_key) == 521 and \
+                        sig == SignatureScheme.ecdsa_secp521r1_sha512:
+                    return sig
+                elif len(self.private_key) == 384 and \
+                        sig == SignatureScheme.ecdsa_secp384r1_sha384:
+                    return sig
+                elif len(self.private_key) == 256 and \
+                        sig == SignatureScheme.ecdsa_secp256r1_sha256:
+                    return sig
             else:
                 assert self.private_key.key_type == "rsa"
                 if sig in (SignatureScheme.rsa_pss_sha256,
@@ -940,42 +959,50 @@ class CertificateVerifyGenerator(HandshakeProtocolMessageGenerator):
                                             status.server_random,
                                             status.prf_name)
 
-            # we don't have to handle non pkcs1 padding because the
-            # calcVerifyBytes does everything
-            scheme = SignatureScheme.toRepr(self.sig_alg)
-            hashName = None
-            if scheme is None:
-                padding = "pkcs1"
+            if self.sig_alg[1] == SignatureAlgorithm.ecdsa:
+                self.mgf1_hash = HashAlgorithm.toStr(self.sig_alg[0])
+                padding = None
+                oldPrivateKeyOp = None
+                verify_bytes = verify_bytes[:self.private_key.
+                                            private_key.curve.baselen]
             else:
-                padding = SignatureScheme.getPadding(scheme)
-                if padding == 'pss':
-                    hashName = SignatureScheme.getHash(scheme)
-                    if self.rsa_pss_salt_len is None:
-                        self.rsa_pss_salt_len = \
-                                getattr(hashlib, hashName)().digest_size
-            if not self.mgf1_hash:
-                self.mgf1_hash = hashName
+                # we don't have to handle non pkcs1 padding because the
+                # calcVerifyBytes does everything
+                scheme = SignatureScheme.toRepr(self.sig_alg)
+                hashName = None
+                if scheme is None:
+                    padding = "pkcs1"
+                else:
+                    padding = SignatureScheme.getPadding(scheme)
+                    if padding == 'pss':
+                        hashName = SignatureScheme.getHash(scheme)
+                        if self.rsa_pss_salt_len is None:
+                            self.rsa_pss_salt_len = \
+                                    getattr(hashlib, hashName)().digest_size
+                if not self.mgf1_hash:
+                    self.mgf1_hash = hashName
 
-            def _newRawPrivateKeyOp(self, m, original_rawPrivateKeyOp,
-                                    subs=None, xors=None):
-                signBytes = numberToByteArray(m, numBytes(self.n))
-                signBytes = substitute_and_xor(signBytes, subs, xors)
-                m = bytesToNumber(signBytes)
-                # RSA operations are defined only on numbers that are smaller
-                # than the modulus, so ensure the XORing or substitutions
-                # didn't break it (especially necessary for pycrypto as
-                # it raises exception in such case)
-                if m > self.n:
-                    m %= self.n
-                return original_rawPrivateKeyOp(m)
+                def _newRawPrivateKeyOp(self, m, original_rawPrivateKeyOp,
+                                        subs=None, xors=None):
+                    signBytes = numberToByteArray(m, numBytes(self.n))
+                    signBytes = substitute_and_xor(signBytes, subs, xors)
+                    m = bytesToNumber(signBytes)
+                    # RSA operations are defined only on numbers that are
+                    # smaller than the modulus, so ensure the XORing or
+                    # substitutions
+                    # didn't break it (especially necessary for pycrypto as
+                    # it raises exception in such case)
+                    if m > self.n:
+                        m %= self.n
+                    return original_rawPrivateKeyOp(m)
 
-            oldPrivateKeyOp = self.private_key._rawPrivateKeyOp
-            self.private_key._rawPrivateKeyOp = \
-                partial(_newRawPrivateKeyOp,
-                        self.private_key,
-                        original_rawPrivateKeyOp=oldPrivateKeyOp,
-                        subs=self.padding_subs,
-                        xors=self.padding_xors)
+                oldPrivateKeyOp = self.private_key._rawPrivateKeyOp
+                self.private_key._rawPrivateKeyOp = \
+                    partial(_newRawPrivateKeyOp,
+                            self.private_key,
+                            original_rawPrivateKeyOp=oldPrivateKeyOp,
+                            subs=self.padding_subs,
+                            xors=self.padding_xors)
             try:
                 signature = self.private_key.sign(verify_bytes,
                                                   padding,
